@@ -19,6 +19,7 @@ emcc can be influenced by a few environment variables:
                    steps, that would normally not be separately produced (so this
                    slows down compilation).
 """
+import textwrap
 
 from tools.toolchain_profiler import ToolchainProfiler
 
@@ -36,6 +37,7 @@ from subprocess import PIPE
 
 
 from tools import building
+from tools import cache
 from tools import colored_logger
 from tools import diagnostics
 from tools import ports
@@ -45,7 +47,7 @@ from tools import utils
 from tools.shared import unsuffixed, unsuffixed_basename, get_file_suffix
 from tools.shared import run_process, exit_with_error, DEBUG
 from tools.shared import in_temp, OFormat
-from tools.shared import DYLIB_EXTENSIONS
+# from tools.shared import DYLIB_EXTENSIONS
 from tools.response_file import substitute_response_files
 from tools import config
 # from tools import cache
@@ -84,11 +86,11 @@ EXTRA_INCOMING_JS_API = [
 SIMD_INTEL_FEATURE_TOWER = ['-msse', '-msse2', '-msse3', '-mssse3', '-msse4.1', '-msse4.2', '-msse4', '-mavx', '-mavx2']
 SIMD_NEON_FLAGS = ['-mfpu=neon']
 LINK_ONLY_FLAGS = {
-    '--bind', '--closure', '--cpuprofiler', '--embed-file',
-    '--emit-symbol-map', '--emrun', '--exclude-file', '--extern-post-js',
-    '--extern-pre-js', '--ignore-dynamic-linking', '--js-library',
-    '--js-transform', '--oformat', '--output_eol',
-    '--post-js', '--pre-js', '--preload-file', '--profiling-funcs',
+    '--cpuprofiler', '--embed-file',
+    '--emit-symbol-map', '--exclude-file',
+    '--ignore-dynamic-linking',
+    '--oformat', '--output_eol',
+    '--preload-file', '--profiling-funcs',
     '--proxy-to-worker', '--shell-file', '--source-map-base',
     '--threadprofiler', '--use-preload-plugins'
 }
@@ -107,8 +109,6 @@ CLANG_FLAGS_WITH_ARGS = {
 class Mode(Enum):
     # Used any time we are not linking, including PCH, pre-processing, etc
     COMPILE_ONLY = auto()
-    # Only when --post-link is specified
-    POST_LINK_ONLY = auto()
     # This is the default mode, in the absence of any flags such as -c, -E, etc
     COMPILE_AND_LINK = auto()
 
@@ -153,21 +153,10 @@ class NGageOptions:
         self.oformat = None
         self.requested_debug = None
         self.emit_symbol_map = False
-        # self.use_closure_compiler = None
-        # self.closure_args = []
-        # self.js_transform = None
-        # self.pre_js = [] # before all js
-        # self.post_js = [] # after all js
-        # self.extern_pre_js = [] # before all js, external to optimized code
-        # self.extern_post_js = [] # after all js, external to optimized code
-        # self.preload_files = []
-        # self.embed_files = []
         self.exclude_files = []
         self.ignore_dynamic_linking = False
         self.shell_path = None
         self.source_map_base = ''
-        self.emit_tsd = ''
-        self.embind_emit_tsd = ''
         self.emrun = False
         self.cpu_profiler = False
         self.memory_profiler = False
@@ -399,11 +388,6 @@ def get_clang_flags(user_args):
     if settings.PTHREADS:
         if '-pthread' not in user_args:
             flags.append('-pthread')
-    elif settings.SHARED_MEMORY:
-        if '-matomics' not in user_args:
-            flags.append('-matomics')
-        if '-mbulk-memory' not in user_args:
-            flags.append('-mbulk-memory')
 
     if settings.RELOCATABLE and '-fPIC' not in user_args:
         flags.append('-fPIC')
@@ -444,15 +428,6 @@ def get_cflags(user_args):
 
     if settings.MAIN_GCCMAIN_MACRO:
         cflags.append('-Dmain=__gccmain')
-
-    # if settings.EMSCRIPTEN_TRACING:
-    #     cflags.append('-D__EMSCRIPTEN_TRACING__=1')
-    #
-    # if settings.SHARED_MEMORY:
-    #     cflags.append('-D__EMSCRIPTEN_SHARED_MEMORY__=1')
-    #
-    # if settings.WASM_WORKERS:
-    #     cflags.append('-D__EMSCRIPTEN_WASM_WORKERS__=1')
 
     # if not settings.STRICT:
     #     # The preprocessor define EMSCRIPTEN is deprecated. Don't pass it to code
@@ -525,20 +500,11 @@ def run(args):
         compiler = shared.EPOC32_CC
 
     # Special case the handling of `-v` because it has a special/different meaning
-    # when used with no other arguments.  In particular, we must handle this early
-    # on, before we inject EMCC_CFLAGS.  This is because tools like cmake and
-    # autoconf will run `emcc -v` to determine the compiler version and we don't
-    # want that to break for users of EMCC_CFLAGS.
+    # when used with no other arguments.
     if len(args) == 2 and args[1] == '-v':
         # autoconf likes to see 'GNU' in the output to enable shared object support
         print(version_string(), file=sys.stderr)
         return shared.check_call([compiler, '-v'] + get_target_flags(), check=False).returncode
-
-    # # Additional compiler flags that we treat as if they were passed to us on the
-    # # commandline
-    # EMCC_CFLAGS = os.environ.get('EMCC_CFLAGS')
-    # if EMCC_CFLAGS:
-    #     args += shlex.split(EMCC_CFLAGS)
 
     if DEBUG:
         logger.warning(f'invocation: {shared.shlex_join(args)} (in {os.getcwd()})')
@@ -563,12 +529,12 @@ def run(args):
         # we read it here.  We have CI rules that ensure its always up-to-date.
         print(read_file(utils.path_from_root('docs/emcc.txt')))
 
-        print('''
-------------------------------------------------------------------
-
-emcc: supported targets: llvm bitcode, WebAssembly, NOT elf
-(autoconf likes to see elf above to enable shared object support)
-''')
+        print(textwrap.dedent('''
+            ------------------------------------------------------------------
+            
+            ngage-cc: supported targets: arm-epoc-pe, thumb-epoc-pe, NOT elf
+            (autoconf likes to see elf above to enable shared object support)
+        '''))
         return 0
 
     ## Process argument and setup the compiler
@@ -582,36 +548,15 @@ emcc: supported targets: llvm bitcode, WebAssembly, NOT elf
 
     if '--version' in args:
         print(version_string())
-        print('''\
-Copyright (C) 2014 the Emscripten authors (see AUTHORS.txt)
-This is free and open source software under the MIT license.
-There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-''')
+        print(textwrap.dedent('''\
+            Copyright (C) 2014 the Emscripten authors (see AUTHORS.txt)
+            This is free and open source software under the MIT license.
+            There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+            '''))
         return 0
 
     if '-dumpversion' in args: # gcc's doc states "Print the compiler version [...] and don't do anything else."
-        print(utils.EMSCRIPTEN_VERSION)
-        return 0
-
-    if '--cflags' in args:
-        # fake running the command, to see the full args we pass to clang
-        args = [x for x in args if x != '--cflags']
-        with shared.get_temp_files().get_file(suffix='.o') as temp_target:
-            input_file = 'hello_world.c'
-            compiler = shared.EMCC
-            if shared.run_via_emxx:
-                compiler = shared.EMXX
-            cmd = [compiler, utils.path_from_root('test', input_file), '-v', '-c', '-o', temp_target] + args
-            proc = run_process(cmd, stderr=PIPE, check=False)
-            if proc.returncode != 0:
-                print(proc.stderr)
-                exit_with_error('error getting cflags')
-            lines = [x for x in proc.stderr.splitlines() if compiler in x and input_file in x]
-            if not lines:
-                exit_with_error(f'unable to parse output of `{cmd}`:\n{proc.stderr}')
-            parts = shlex.split(lines[0].replace('\\', '\\\\'))
-            parts = [x for x in parts if x not in ['-c', '-o', '-v', '-emit-llvm'] and input_file not in x and temp_target not in x]
-            print(shared.shlex_join(parts[1:]))
+        print(utils.NGAGE_TOOLCHAIN_VERSION)
         return 0
 
     if '-dumpmachine' in args or '-print-target-triple' in args or '--print-target-triple' in args:
@@ -646,36 +591,11 @@ There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR P
 
     # End early-exit flag handling
 
-    # if 'EMMAKEN_NO_SDK' in os.environ:
-    #     exit_with_error('EMMAKEN_NO_SDK is no longer supported.  The standard -nostdlib and -nostdinc flags should be used instead')
-    #
-    # if 'EMMAKEN_COMPILER' in os.environ:
-    #     exit_with_error('`EMMAKEN_COMPILER` is no longer supported.\n' +
-    #                     'Please use the `LLVM_ROOT` and/or `COMPILER_WRAPPER` config settings instead')
-    #
-    # if 'EMMAKEN_CFLAGS' in os.environ:
-    #     exit_with_error('`EMMAKEN_CFLAGS` is no longer supported, please use `EMCC_CFLAGS` instead')
-    #
-    # if 'EMCC_REPRODUCE' in os.environ:
-    #     options.reproduce = os.environ['EMCC_REPRODUCE']
-
     # For internal consistency, ensure we don't attempt or read or write any link time
     # settings until we reach the linking phase.
     settings.limit_settings(COMPILE_TIME_SETTINGS)
 
     phase_setup(options, state)
-
-    # if options.reproduce:
-    #     create_reproduce_file(options.reproduce, args)
-
-    if state.mode == Mode.POST_LINK_ONLY:
-        if len(options.input_files) != 1:
-            exit_with_error('--post-link requires a single input file')
-        separate_linker_flags(state, newargs)
-        # Delay import of link.py to avoid processing this file when only compiling
-        from tools import link
-        link.run_post_link(options.input_files[0], options, state)
-        return 0
 
     # Compile source code to object files
     # When only compiling this function never returns.
@@ -702,7 +622,7 @@ def normalize_boolean_setting(name, value):
 
 
 @ToolchainProfiler.profile_block('parse arguments')
-def phase_parse_arguments(state):
+def phase_parse_arguments(state: NGageCCState):
     """The first phase of the compiler.  Parse command line argument and
     populate settings.
     """
@@ -797,9 +717,9 @@ def separate_linker_flags(state, newargs):
             if not os.path.exists(arg) and arg not in (os.devnull, '-'):
                 exit_with_error('%s: No such file or directory ("%s" was expected to be an input file, based on the commandline arguments provided)', arg, arg)
             input_files.append((i, arg))
-        elif arg == '-z':
-            state.add_link_flag(i, newargs[i])
-            state.add_link_flag(i + 1, get_next_arg())
+        # elif arg == '-z':
+        #     state.add_link_flag(i, newargs[i])
+        #     state.add_link_flag(i + 1, get_next_arg())
         elif arg.startswith('-Wl,'):
             # Multiple comma separated link flags can be specified. Create fake
             # fractional indices for these: -Wl,a,b,c,d at index 4 becomes:
@@ -811,8 +731,6 @@ def separate_linker_flags(state, newargs):
             state.add_link_flag(i + 1, get_next_arg())
         elif arg == '-s':
             state.add_link_flag(i, newargs[i])
-        elif arg == '-s' or arg.startswith(('-l', '-L', '--js-library=', '-z')):
-            state.add_link_flag(i, arg)
         elif not arg.startswith('-o') and arg not in ('-nostdlib', '-nostartfiles', '-nolibc', '-nodefaultlibs', '-s'):
             # All other flags are for the compiler
             compiler_args.append(arg)
@@ -829,9 +747,7 @@ def phase_setup(options, state):
 
     has_header_inputs = any(get_file_suffix(f) in HEADER_EXTENSIONS for f in options.input_files)
 
-    if options.post_link:
-        state.mode = Mode.POST_LINK_ONLY
-    elif has_header_inputs or options.dash_c or options.dash_S or options.syntax_only or options.dash_E or options.dash_M:
+    if has_header_inputs or options.dash_c or options.dash_S or options.syntax_only or options.dash_E or options.dash_M:
         state.mode = Mode.COMPILE_ONLY
 
     if state.mode == Mode.COMPILE_ONLY:
@@ -851,79 +767,6 @@ def phase_setup(options, state):
 
     if 'USE_PTHREADS' in user_settings:
         settings.PTHREADS = settings.USE_PTHREADS
-
-    # Pthreads and Wasm Workers require targeting shared Wasm memory (SAB).
-    if settings.PTHREADS: # or settings.WASM_WORKERS:
-        settings.SHARED_MEMORY = 1
-
-    if settings.SHARED_MEMORY:
-        settings.BULK_MEMORY = 1
-
-    # if 'DISABLE_EXCEPTION_CATCHING' in user_settings and 'EXCEPTION_CATCHING_ALLOWED' in user_settings:
-    #     # If we get here then the user specified both DISABLE_EXCEPTION_CATCHING and EXCEPTION_CATCHING_ALLOWED
-    #     # on the command line.  This is no longer valid so report either an error or a warning (for
-    #     # backwards compat with the old `DISABLE_EXCEPTION_CATCHING=2`
-    #     if user_settings['DISABLE_EXCEPTION_CATCHING'] in ('0', '2'):
-    #         diagnostics.warning('deprecated', 'DISABLE_EXCEPTION_CATCHING=X is no longer needed when specifying EXCEPTION_CATCHING_ALLOWED')
-    #     else:
-    #         exit_with_error('DISABLE_EXCEPTION_CATCHING and EXCEPTION_CATCHING_ALLOWED are mutually exclusive')
-
-    # if settings.EXCEPTION_CATCHING_ALLOWED:
-    #     settings.DISABLE_EXCEPTION_CATCHING = 0
-
-    # if settings.WASM_EXCEPTIONS:
-    #     if user_settings.get('DISABLE_EXCEPTION_CATCHING') == '0':
-    #         exit_with_error('DISABLE_EXCEPTION_CATCHING=0 is not compatible with -fwasm-exceptions')
-    #     if user_settings.get('DISABLE_EXCEPTION_THROWING') == '0':
-    #         exit_with_error('DISABLE_EXCEPTION_THROWING=0 is not compatible with -fwasm-exceptions')
-    #     # -fwasm-exceptions takes care of enabling them, so users aren't supposed to
-    #     # pass them explicitly, regardless of their values
-    #     if 'DISABLE_EXCEPTION_CATCHING' in user_settings or 'DISABLE_EXCEPTION_THROWING' in user_settings:
-    #         diagnostics.warning('emcc', 'you no longer need to pass DISABLE_EXCEPTION_CATCHING or DISABLE_EXCEPTION_THROWING when using Wasm exceptions')
-    #     settings.DISABLE_EXCEPTION_CATCHING = 1
-    #     settings.DISABLE_EXCEPTION_THROWING = 1
-    #
-    #     if user_settings.get('ASYNCIFY') == '1':
-    #         diagnostics.warning('emcc', 'ASYNCIFY=1 is not compatible with -fwasm-exceptions. Parts of the program that mix ASYNCIFY and exceptions will not compile.')
-    #
-    #     if user_settings.get('SUPPORT_LONGJMP') == 'emscripten':
-    #         exit_with_error('SUPPORT_LONGJMP=emscripten is not compatible with -fwasm-exceptions')
-
-    # if settings.DISABLE_EXCEPTION_THROWING and not settings.DISABLE_EXCEPTION_CATCHING:
-    #     exit_with_error("DISABLE_EXCEPTION_THROWING was set (probably from -fno-exceptions) but is not compatible with enabling exception catching (DISABLE_EXCEPTION_CATCHING=0). If you don't want exceptions, set DISABLE_EXCEPTION_CATCHING to 1; if you do want exceptions, don't link with -fno-exceptions")
-
-    # if options.target.startswith('wasm64'):
-    #     default_setting('MEMORY64', 1)
-    #
-    # if settings.MEMORY64 and options.target.startswith('wasm32'):
-    #     exit_with_error('wasm32 target is not compatible with -sMEMORY64')
-
-    # # Wasm SjLj cannot be used with Emscripten EH
-    # if settings.SUPPORT_LONGJMP == 'wasm':
-    #     # DISABLE_EXCEPTION_THROWING is 0 by default for Emscripten EH throwing, but
-    #     # Wasm SjLj cannot be used with Emscripten EH. We error out if
-    #     # DISABLE_EXCEPTION_THROWING=0 is explicitly requested by the user;
-    #     # otherwise we disable it here.
-    #     if user_settings.get('DISABLE_EXCEPTION_THROWING') == '0':
-    #         exit_with_error('SUPPORT_LONGJMP=wasm cannot be used with DISABLE_EXCEPTION_THROWING=0')
-    #     # We error out for DISABLE_EXCEPTION_CATCHING=0, because it is 1 by default
-    #     # and this can be 0 only if the user specifies so.
-    #     if user_settings.get('DISABLE_EXCEPTION_CATCHING') == '0':
-    #         exit_with_error('SUPPORT_LONGJMP=wasm cannot be used with DISABLE_EXCEPTION_CATCHING=0')
-    #     default_setting('DISABLE_EXCEPTION_THROWING', 1)
-
-    # # SUPPORT_LONGJMP=1 means the default SjLj handling mechanism, which is 'wasm'
-    # # if Wasm EH is used and 'emscripten' otherwise.
-    # if settings.SUPPORT_LONGJMP == 1:
-    #     if settings.WASM_EXCEPTIONS:
-    #         settings.SUPPORT_LONGJMP = 'wasm'
-    #     else:
-    #         settings.SUPPORT_LONGJMP = 'emscripten'
-
-    # # SDL2 requires eglGetProcAddress() to work.
-    # # NOTE: if SDL2 is updated to not rely on eglGetProcAddress(), this can be removed
-    # if settings.USE_SDL == 2 or settings.USE_SDL_MIXER == 2 or settings.USE_SDL_GFX == 2:
-    #     default_setting('GL_ENABLE_GET_PROC_ADDRESS', 1)
 
 
 @ToolchainProfiler.profile_block('compile inputs')
@@ -1006,9 +849,9 @@ def phase_compile_inputs(options, state, newargs):
         file_suffix = get_file_suffix(input_file)
         if file_suffix in SOURCE_EXTENSIONS | ASSEMBLY_EXTENSIONS or (options.dash_c and file_suffix == '.bc'):
             compile_source_file(i, input_file)
-        elif file_suffix in DYLIB_EXTENSIONS:
-            logger.debug(f'using shared library: {input_file}')
-            linker_inputs.append((i, input_file))
+        # elif file_suffix in DYLIB_EXTENSIONS:
+        #     logger.debug(f'using shared library: {input_file}')
+        #     linker_inputs.append((i, input_file))
         elif building.is_ar(input_file):
             logger.debug(f'using static library: {input_file}')
             linker_inputs.append((i, input_file))
@@ -1033,10 +876,10 @@ def version_string():
             ['git', 'rev-parse', 'HEAD'],
             stdout=PIPE, stderr=PIPE, cwd=utils.path_from_root()).stdout.strip()
         revision_suffix = ' (%s)' % git_rev
-    elif os.path.exists(utils.path_from_root('emscripten-revision.txt')):
-        rev = read_file(utils.path_from_root('emscripten-revision.txt')).strip()
+    elif os.path.exists(utils.path_from_root('ngage-toolchain-revision.txt')):
+        rev = read_file(utils.path_from_root('ngage-toolchain-revision.txt')).strip()
         revision_suffix = ' (%s)' % rev
-    return f'emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) {utils.EMSCRIPTEN_VERSION}{revision_suffix}'
+    return f'ngage-sdk (gcc/clang-like replacement + linker emulating GNU ld) {utils.EMSCRIPTEN_VERSION}{revision_suffix}'
 
 
 def parse_args(newargs):  # noqa: C901, PLR0912, PLR0915
@@ -1058,11 +901,6 @@ def parse_args(newargs):  # noqa: C901, PLR0912, PLR0915
         if skip:
             skip = False
             continue
-
-        # Support legacy '--bind' flag, by mapping to `-lembind` which now
-        # has the same effect
-        if newargs[i] == '--bind':
-            newargs[i] = '-lembind'
 
         arg = newargs[i]
         arg_value = None
@@ -1130,55 +968,14 @@ def parse_args(newargs):  # noqa: C901, PLR0912, PLR0915
             # else:
             #     settings.SHRINK_LEVEL = 0
             settings.OPT_LEVEL = validate_arg_level(requested_level, 3, 'invalid optimization level: ' + arg, clamp=True)
-        # elif check_arg('--js-opts'):
-        #     logger.warning('--js-opts ignored when using llvm backend')
-        #     consume_arg()
-        # elif check_arg('--llvm-opts'):
-        #     diagnostics.warning('deprecated', '--llvm-opts is deprecated.  All non-emcc args are passed through to clang.')
-        # elif arg.startswith('-flto'):
-        #     if '=' in arg:
-        #         settings.LTO = arg.split('=')[1]
-        #     else:
-        #         settings.LTO = 'full'
-        # elif arg == "-fno-lto":
-        #     settings.LTO = 0
         elif arg == "--save-temps":
             options.save_temps = True
-        # elif check_arg('--llvm-lto'):
-        #     logger.warning('--llvm-lto ignored when using llvm backend')
-        #     consume_arg()
-        # elif check_arg('--closure-args'):
-        #     args = consume_arg()
-        #     options.closure_args += shlex.split(args)
-        # elif check_arg('--closure'):
-        #     options.use_closure_compiler = int(consume_arg())
-        # elif check_arg('--js-transform'):
-        #     options.js_transform = consume_arg()
-        # elif check_arg('--reproduce'):
-        #     options.reproduce = consume_arg()
-        # elif check_arg('--pre-js'):
-        #     options.pre_js.append(consume_arg_file())
-        # elif check_arg('--post-js'):
-        #     options.post_js.append(consume_arg_file())
-        # elif check_arg('--extern-pre-js'):
-        #     options.extern_pre_js.append(consume_arg_file())
-        # elif check_arg('--extern-post-js'):
-        #     options.extern_post_js.append(consume_arg_file())
-        # elif check_arg('--compiler-wrapper'):
-        #     config.COMPILER_WRAPPER = consume_arg()
-        # elif check_flag('--post-link'):
-        #     options.post_link = True
         # elif check_arg('--oformat'):
         #     formats = [f.lower() for f in OFormat.__members__]
         #     fmt = consume_arg()
         #     if fmt not in formats:
         #         exit_with_error('invalid output format: `%s` (must be one of %s)' % (fmt, formats))
         #     options.oformat = getattr(OFormat, fmt.upper())
-        # elif check_arg('--minify'):
-        #     arg = consume_arg()
-        #     if arg != '0':
-        #         exit_with_error('0 is the only supported option for --minify; 1 has been deprecated')
-        #     options.no_minify = True
         elif arg.startswith('-g'):
             options.requested_debug = arg
             requested_level = removeprefix(arg, '-g') or '3'
@@ -1233,87 +1030,34 @@ def parse_args(newargs):  # noqa: C901, PLR0912, PLR0915
                 # In all cases set the emscripten debug level to 3 so that we do not
                 # strip during link (during compile, this does not make a difference).
                 settings.DEBUG_LEVEL = 3
-        # elif check_flag('-profiling') or check_flag('--profiling'):
-        #     settings.DEBUG_LEVEL = max(settings.DEBUG_LEVEL, 2)
-        #     settings.EMIT_NAME_SECTION = 1
-        # elif check_flag('-profiling-funcs') or check_flag('--profiling-funcs'):
-        #     settings.EMIT_NAME_SECTION = 1
-        # elif newargs[i] == '--tracing' or newargs[i] == '--memoryprofiler':
-        #     if newargs[i] == '--memoryprofiler':
-        #         options.memory_profiler = True
-        #     newargs[i] = ''
-        #     settings_changes.append('EMSCRIPTEN_TRACING=1')
-        #     settings.JS_LIBRARIES.append('libtrace.js')
-        # elif check_flag('--emit-symbol-map'):
-        #     options.emit_symbol_map = True
-        #     settings.EMIT_SYMBOL_MAP = 1
-        # elif check_arg('--emit-minification-map'):
-        #     settings.MINIFICATION_MAP = consume_arg()
-        # elif check_arg('--embed-file'):
-        #     options.embed_files.append(consume_arg())
-        # elif check_arg('--preload-file'):
-        #     options.preload_files.append(consume_arg())
-        # elif check_arg('--exclude-file'):
-        #     options.exclude_files.append(consume_arg())
-        # elif check_flag('--use-preload-cache'):
-        #     options.use_preload_cache = True
-        # elif check_flag('--no-heap-copy'):
-        #     diagnostics.warning('legacy-settings', 'ignoring legacy flag --no-heap-copy (that is the only mode supported now)')
-        # elif check_flag('--use-preload-plugins'):
-        #     options.use_preload_plugins = True
-        # elif check_flag('--ignore-dynamic-linking'):
-        #     options.ignore_dynamic_linking = True
         elif arg == '-v':
             shared.PRINT_SUBPROCS = True
         elif arg == '-###':
             shared.SKIP_SUBPROCS = True
-        # elif check_arg('--shell-file'):
-        #     options.shell_path = consume_arg_file()
-        # elif check_arg('--source-map-base'):
-        #     options.source_map_base = consume_arg()
-        # elif check_arg('--embind-emit-tsd'):
-        #     diagnostics.warning('deprecated', '--embind-emit-tsd is deprecated.  Use --emit-tsd instead.')
-        #     options.emit_tsd = consume_arg()
-        # elif check_arg('--emit-tsd'):
-        #     options.emit_tsd = consume_arg()
-        # elif check_flag('--no-entry'):
-        #     options.no_entry = True
-        # elif check_flag('--remove-duplicates'):
-        #     diagnostics.warning('legacy-settings', '--remove-duplicates is deprecated as it is no longer needed. If you cannot link without it, file a bug with a testcase')
-        # elif check_flag('--jcache'):
-        #     logger.error('jcache is no longer supported')
-        # elif check_arg('--cache'):
-        #     config.CACHE = os.path.abspath(consume_arg())
-        #     cache.setup()
-        #     # Ensure child processes share the same cache (e.g. when using emcc to compiler system
-        #     # libraries)
-        #     os.environ['EM_CACHE'] = config.CACHE
-        # elif check_flag('--clear-cache'):
-        #     logger.info('clearing cache as requested by --clear-cache: `%s`', cache.cachedir)
-        #     cache.erase()
-        #     shared.perform_sanity_checks() # this is a good time for a sanity check
-        #     should_exit = True
-        # elif check_flag('--clear-ports'):
-        #     logger.info('clearing ports and cache as requested by --clear-ports')
-        #     ports.clear()
-        #     cache.erase()
-        #     shared.perform_sanity_checks() # this is a good time for a sanity check
-        #     should_exit = True
-        # elif check_flag('--check'):
-        #     print(version_string(), file=sys.stderr)
-        #     shared.check_sanity(force=True)
-        #     should_exit = True
-        # elif check_flag('--show-ports'):
-        #     ports.show_ports()
-        #     should_exit = True
-        # elif check_arg('--memory-init-file'):
-        #     exit_with_error('--memory-init-file is no longer supported')
-        # elif check_flag('--proxy-to-worker'):
-        #     settings_changes.append('PROXY_TO_WORKER=1')
-        # elif check_arg('--valid-abspath'):
-        #     options.valid_abspaths.append(consume_arg())
-        # elif check_flag('--separate-asm'):
-        #     exit_with_error('cannot --separate-asm with the wasm backend, since not emitting asm.js')
+        elif check_arg('--cache'):
+            config.CACHE = os.path.abspath(consume_arg())
+            cache.setup()
+            # Ensure child processes share the same cache (e.g. when using emcc to compiler system
+            # libraries)
+            os.environ['EM_CACHE'] = config.CACHE
+        elif check_flag('--clear-cache'):
+            logger.info('clearing cache as requested by --clear-cache: `%s`', cache.cachedir)
+            cache.erase()
+            shared.perform_sanity_checks() # this is a good time for a sanity check
+            should_exit = True
+        elif check_flag('--clear-ports'):
+            logger.info('clearing ports and cache as requested by --clear-ports')
+            ports.clear()
+            cache.erase()
+            shared.perform_sanity_checks() # this is a good time for a sanity check
+            should_exit = True
+        elif check_flag('--check'):
+            print(version_string(), file=sys.stderr)
+            shared.check_sanity(force=True)
+            should_exit = True
+        elif check_flag('--show-ports'):
+            ports.show_ports()
+            should_exit = True
         elif arg.startswith(('-I', '-L')):
             path_name = arg[2:]
             if os.path.isabs(path_name) and not is_valid_abspath(options, path_name):
@@ -1326,59 +1070,12 @@ def parse_args(newargs):  # noqa: C901, PLR0912, PLR0915
                                       'encountered. If this is to a local system header/library, it may '
                                       'cause problems (local system files make sense for compiling natively '
                                       'on your system, but not necessarily to JavaScript).')
-        # elif check_flag('--emrun'):
-        #     options.emrun = True
-        # elif check_flag('--cpuprofiler'):
-        #     options.cpu_profiler = True
-        # elif check_flag('--threadprofiler'):
-        #     settings_changes.append('PTHREADS_PROFILING=1')
-        # elif arg == '-fno-exceptions':
-        #     settings.DISABLE_EXCEPTION_CATCHING = 1
-        #     settings.DISABLE_EXCEPTION_THROWING = 1
-        #     settings.WASM_EXCEPTIONS = 0
-        # elif arg == '-mbulk-memory':
-        #     settings.BULK_MEMORY = 1
-        #     feature_matrix.enable_feature(feature_matrix.Feature.BULK_MEMORY,
-        #                                   '-mbulk-memory',
-        #                                   override=True)
-        # elif arg == '-mno-bulk-memory':
-        #     settings.BULK_MEMORY = 0
-        #     feature_matrix.disable_feature(feature_matrix.Feature.BULK_MEMORY)
-        # elif arg == '-msign-ext':
-        #     feature_matrix.enable_feature(feature_matrix.Feature.SIGN_EXT,
-        #                                   '-msign-ext',
-        #                                   override=True)
-        # elif arg == '-mno-sign-ext':
-        #     feature_matrix.disable_feature(feature_matrix.Feature.SIGN_EXT)
-        # elif arg == '-mnontrappting-fptoint':
-        #     feature_matrix.enable_feature(feature_matrix.Feature.NON_TRAPPING_FPTOINT,
-        #                                   '-mnontrapping-fptoint',
-        #                                   override=True)
-        # elif arg == '-mno-nontrapping-fptoint':
-        #     feature_matrix.disable_feature(feature_matrix.Feature.NON_TRAPPING_FPTOINT)
         elif arg == '-fexceptions':
             # TODO Currently -fexceptions only means Emscripten EH. Switch to wasm
             # exception handling by default when -fexceptions is given when wasm
             # exception handling becomes stable.
             settings.DISABLE_EXCEPTION_THROWING = 0
             settings.DISABLE_EXCEPTION_CATCHING = 0
-        # elif arg == '-fwasm-exceptions':
-        #     settings.WASM_EXCEPTIONS = 1
-        # elif arg == '-fignore-exceptions':
-        #     settings.DISABLE_EXCEPTION_CATCHING = 1
-        # elif check_arg('--default-obj-ext'):
-        #     exit_with_error('--default-obj-ext is no longer supported by emcc')
-        # elif arg.startswith('-fsanitize=cfi'):
-        #     exit_with_error('emscripten does not currently support -fsanitize=cfi')
-        # elif check_arg('--output_eol'):
-        #     style = consume_arg()
-        #     if style.lower() == 'windows':
-        #         options.output_eol = '\r\n'
-        #     elif style.lower() == 'linux':
-        #         options.output_eol = '\n'
-        #     else:
-        #         exit_with_error(f'Invalid value "{style}" to --output_eol!')
-        # # Record PTHREADS setting because it controls whether --shared-memory is passed to lld
         elif arg == '-pthread':
             settings.PTHREADS = 1
             # Also set the legacy setting name, in case use JS code depends on it.

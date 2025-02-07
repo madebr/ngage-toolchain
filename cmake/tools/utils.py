@@ -116,8 +116,8 @@ def memoize(func):
 
 # TODO: Move this back to shared.py once importing that file becoming side effect free (i.e. it no longer requires a config).
 def set_version_globals():
-    global EMSCRIPTEN_VERSION, EMSCRIPTEN_VERSION_MAJOR, EMSCRIPTEN_VERSION_MINOR, EMSCRIPTEN_VERSION_TINY
-    filename = path_from_root('emscripten-version.txt')
-    EMSCRIPTEN_VERSION = read_file(filename).strip().strip('"')
-    parts = [int(x) for x in EMSCRIPTEN_VERSION.split('-')[0].split('.')]
-    EMSCRIPTEN_VERSION_MAJOR, EMSCRIPTEN_VERSION_MINOR, EMSCRIPTEN_VERSION_TINY = parts
+    global NGAGE_TOOLCHAIN_VERSION, NGAGE_TOOLCHAIN_MAJOR, NGAGE_TOOLCHAIN_MINOR, NGAGE_TOOLCHAIN_TINY
+    filename = path_from_root('ngage-toolchain-version.txt')
+    NGAGE_TOOLCHAIN_VERSION = read_file(filename).strip().strip('"')
+    parts = [int(x) for x in NGAGE_TOOLCHAIN_VERSION.split('-')[0].split('.')]
+    NGAGE_TOOLCHAIN_MAJOR, NGAGE_TOOLCHAIN_MINOR, NGAGE_TOOLCHAIN_TINY = parts

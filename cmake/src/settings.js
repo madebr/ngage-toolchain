@@ -41,10 +41,48 @@
 // compile+link.
 //
 
+// set UID1
+// [compile]
+var UID1 = '';
+
+// set UID2
+// [compile]
+var UID2 = '';
+
+// set UID3
+// [compile]
+var UID3 = '';
 
 // Define main=__gccmain macro
 // [compile]
 var MAIN_GCCMAIN_MACRO = true;
+
+// set entry address (argument of '-Wl,-e' and `-Wl,-u' )
+// [link]
+var ENTRY = '_E32Startup';
+
+// build thumb code
+// [compile]
+var THUMB = false;
+
+// Symbols that are explicitly exported. These symbols are kept alive through
+// LLVM dead code elimination, and also made accessible outside of the
+// generated code even after running closure compiler (on "Module").  Native
+// symbols listed here require an ``_`` prefix.
+//
+// By default if this setting is not specified on the command line the
+// ``_main`` function will be implicitly exported.  In STANDALONE_WASM mode the
+// default export is ``__start`` (or ``__initialize`` if --no-entry is specified).
+//
+// JS Library symbols can also be added to this list (without the leading `$`).
+// [link]
+var EXPORTED_FUNCTIONS = [];
+
+// Run dlltool, ld and petran on executable
+// FIXME: rename this option
+// [link]
+var FIXME_DLLTOOL_LD_PETRAN = true;
+
 
 // // Define main=E32Main macro
 // // [compile]
@@ -1072,18 +1110,6 @@ var INLINING_LIMIT = false;
 // // [link]
 // var NODE_CODE_CACHING = false;
 //
-// // Symbols that are explicitly exported. These symbols are kept alive through
-// // LLVM dead code elimination, and also made accessible outside of the
-// // generated code even after running closure compiler (on "Module").  Native
-// // symbols listed here require an ``_`` prefix.
-// //
-// // By default if this setting is not specified on the command line the
-// // ``_main`` function will be implicitly exported.  In STANDALONE_WASM mode the
-// // default export is ``__start`` (or ``__initialize`` if --no-entry is specified).
-// //
-// // JS Library symbols can also be added to this list (without the leading `$`).
-// // [link]
-// var EXPORTED_FUNCTIONS = [];
 //
 // // If true, we export all the symbols that are present in JS onto the Module
 // // object. This does not affect which symbols will be present - it does not
@@ -1219,7 +1245,7 @@ var LINKABLE = false;
 //   - ALLOW_UNIMPLEMENTED_SYSCALLS is disabled.
 //   - INCOMING_MODULE_JS_API is set to empty by default.
 // [compile+link]
-var STRICT = false;
+//var STRICT = false;
 
 // // Allow program to link with or without ``main`` symbol.
 // // If this is disabled then one must provide a ``main`` symbol or explicitly
@@ -1658,7 +1684,7 @@ var ERROR_ON_UNDEFINED_SYMBOLS = true;
 
 // If 1, target compiling a shared Wasm Memory.
 // [compile+link] - affects user code at compile and system libraries at link.
-var SHARED_MEMORY = false;
+//var SHARED_MEMORY = false;
 
 // // If 1, enables support for Wasm Workers. Wasm Workers enable applications
 // // to create threads using a lightweight web-specific API that builds on top

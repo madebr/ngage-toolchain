@@ -77,7 +77,7 @@ logger = logging.getLogger('shared')
 # # Don't show legacy settings warnings by default
 # diagnostics.add_warning('legacy-settings', enabled=False, part_of_all=False)
 # # Catch-all for other emcc warnings
-# diagnostics.add_warning('linkflags')
+diagnostics.add_warning('missing-uid')
 # diagnostics.add_warning('emcc')
 # diagnostics.add_warning('undefined', error=True)
 diagnostics.add_warning('deprecated', shared=True)
@@ -253,12 +253,14 @@ def exec_process(cmd):
         os.execvp(cmd[0], cmd)
 
 
-def run_js_tool(filename, jsargs=[], node_args=[], **kw):  # noqa: B006
+def run_js_tool(filename, jsargs=None, node_args=None, **kw):  # noqa: B006
     """Execute a javascript tool.
 
     This is used by emcc to run parts of the build process that are written
     implemented in javascript.
     """
+    jsargs = jsargs or []
+    node_args = node_args or []
     command = config.NODE_JS + node_args + [filename] + jsargs
     return check_call(command, **kw).stdout
 
@@ -278,22 +280,22 @@ def get_clang_version():
     if not os.path.exists(EPOC32_CC):
         exit_with_error('clang executable not found at `%s`' % CLANG_CC)
     proc = check_call([EPOC32_CC, '--version'], stdout=PIPE)
-    m = re.search(r'\(GCC\)\s+(\d+\.\d+)', proc.stdout)
+    m = re.search(r'(?:\(GCC\)\s+)?(\d+\.\d+)', proc.stdout)
     return m and m.group(1)
 
 
-def check_llvm_version():
-    actual = get_clang_version()
-    if actual.startswith('%d.' % EXPECTED_LLVM_VERSION):
-        return True
-    # When running in CI environment we also silently allow the next major
-    # version of LLVM here so that new versions of LLVM can be rolled in
-    # without disruption.
-    if 'BUILDBOT_BUILDNUMBER' in os.environ:
-        if actual.startswith('%d.' % (EXPECTED_LLVM_VERSION + 1)):
-            return True
-    diagnostics.warning('version-check', 'LLVM version for clang executable "%s" appears incorrect (seeing "%s", expected "%s")', EPOC32_CC, actual, EXPECTED_LLVM_VERSION)
-    return False
+# def check_llvm_version():
+#     actual = get_clang_version()
+#     if actual.startswith('%d.' % EXPECTED_LLVM_VERSION):
+#         return True
+#     # When running in CI environment we also silently allow the next major
+#     # version of LLVM here so that new versions of LLVM can be rolled in
+#     # without disruption.
+#     if 'BUILDBOT_BUILDNUMBER' in os.environ:
+#         if actual.startswith('%d.' % (EXPECTED_LLVM_VERSION + 1)):
+#             return True
+#     diagnostics.warning('version-check', 'LLVM version for clang executable "%s" appears incorrect (seeing "%s", expected "%s")', EPOC32_CC, actual, EXPECTED_LLVM_VERSION)
+#     return False
 
 
 def get_clang_targets():
@@ -414,8 +416,8 @@ def generate_sanity():
 @memoize
 def perform_sanity_checks():
     # some warning, mostly not fatal checks - do them even if EM_IGNORE_SANITY is on
-    check_node_version()
-    check_llvm_version()
+    # check_node_version()
+    # check_llvm_version()
 
     llvm_ok = check_llvm()
 
@@ -535,7 +537,7 @@ def build_clang_tool_path(tool):
 # Some distributions ship with multiple clang versions so they add
 # the version to the binaries, cope with that
 def build_ngage_tool_path(tool):
-    return os.path.join(os.environ["NGAGESDK"].replace("/", "\\"), "sdk/sdk/6.1/Shared/EPOC32", tool)
+    return os.path.join(os.environ["NGAGESDK"], "sdk/6.1/Shared/EPOC32", tool)
     # if config.CLANG_ADD_VERSION:
     #     return os.path.join(config.LLVM_ROOT, tool + "-" + config.CLANG_ADD_VERSION)
     # else:
@@ -589,7 +591,7 @@ def in_temp(name):
 
 
 def get_canonical_temp_dir(temp_dir):
-    return os.path.join(temp_dir, 'emscripten_temp')
+    return os.path.join(temp_dir, 'ngagesdk_temp')
 
 
 def setup_temp_dirs():
@@ -618,7 +620,7 @@ def setup_temp_dirs():
         # though, since emcc can recursively call itself when building
         # libraries and ports.
         if 'EM_HAVE_TEMP_DIR_LOCK' not in os.environ:
-            filelock_name = os.path.join(EMSCRIPTEN_TEMP_DIR, 'emscripten.lock')
+            filelock_name = os.path.join(EMSCRIPTEN_TEMP_DIR, 'ngagesdk.lock')
             lock = filelock.FileLock(filelock_name)
             os.environ['EM_HAVE_TEMP_DIR_LOCK'] = '1'
             lock.acquire()
@@ -647,10 +649,10 @@ def print_compiler_stage(cmd):
             return f'"{arg}"'
 
     if SKIP_SUBPROCS:
-        print(' ' + ' '.join([maybe_quote(a) for a in cmd]), file=sys.stderr)
+        print('> ' + ' '.join([maybe_quote(a) for a in cmd]), file=sys.stderr)
         sys.stderr.flush()
     elif PRINT_SUBPROCS:
-        print(' %s %s' % (maybe_quote(cmd[0]), shlex_join(cmd[1:])), file=sys.stderr)
+        print('> %s %s' % (maybe_quote(cmd[0]), shlex_join(cmd[1:])), file=sys.stderr)
         sys.stderr.flush()
 
 
@@ -784,15 +786,9 @@ def init():
 
 @unique
 class OFormat(Enum):
-    # Output a relocatable object file.  We use this
-    # today for `-r` and `-shared`.
     OBJECT = auto()
     EXE = auto()
-    # WASM = auto()
-    # JS = auto()
-    # MJS = auto()
-    # HTML = auto()
-    # BARE = auto()
+    # DLL = auto()
 
 
 # ============================================================================
@@ -805,29 +801,35 @@ class OFormat(Enum):
 
 # CLANG_CC = os.path.expanduser(build_clang_tool_path(exe_suffix('clang')))
 # CLANG_CXX = os.path.expanduser(build_clang_tool_path(exe_suffix('clang++')))
-EPOC32_CC = os.path.expanduser(build_ngage_tool_path(exe_suffix('ngagesdk/bin/arm-epoc-pe-gcc')))
-EPOC32_CXX = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/g++')))
-CLANG_SCAN_DEPS = build_llvm_tool_path(exe_suffix('clang-scan-deps'))
-LLVM_AR = build_llvm_tool_path(exe_suffix('llvm-ar'))
-LLVM_DWP = build_llvm_tool_path(exe_suffix('llvm-dwp'))
-LLVM_RANLIB = build_llvm_tool_path(exe_suffix('llvm-ranlib'))
-LLVM_NM = os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-nm')))
-LLVM_DWARFDUMP = os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-dwarfdump')))
-LLVM_OBJCOPY = os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-objcopy')))
-LLVM_STRIP = os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-strip')))
-# WASM_LD = os.path.expanduser(build_llvm_tool_path(exe_suffix('wasm-ld')))
-EPOC32_LD = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/ld')))
-EPOC32_DLLTOOL = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/dlltool')))
 
-EMCC = bat_suffix(path_from_root('emcc'))
-EMXX = bat_suffix(path_from_root('em++'))
-EMAR = bat_suffix(path_from_root('emar'))
-EMRANLIB = bat_suffix(path_from_root('emranlib'))
-EMCMAKE = bat_suffix(path_from_root('emcmake'))
-EMCONFIGURE = bat_suffix(path_from_root('emconfigure'))
-EM_NM = bat_suffix(path_from_root('emnm'))
-FILE_PACKAGER = bat_suffix(path_from_root('tools/file_packager'))
-WASM_SOURCEMAP = bat_suffix(path_from_root('tools/wasm-sourcemap'))
+# EPOC32_CC = os.path.expanduser(build_ngage_tool_path(exe_suffix('ngagesdk/bin/arm-epoc-pe-gcc')))
+
+EPOC32_CC = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/arm-epoc-pe-gcc')))
+EPOC32_CXX = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/g++')))
+EPOC32_LD = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/arm-epoc-pe-ld')))
+EPOC32_DLLTOOL = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/arm-epoc-pe-dlltool')))
+EPOC32_PETRAN = os.path.expanduser(build_ngage_tool_path(exe_suffix('tools/petran')))
+# CLANG_SCAN_DEPS = build_llvm_tool_path(exe_suffix('clang-scan-deps'))
+# LLVM_AR = build_llvm_tool_path(exe_suffix('llvm-ar'))
+# LLVM_DWP = build_llvm_tool_path(exe_suffix('llvm-dwp'))
+# LLVM_RANLIB = build_llvm_tool_path(exe_suffix('llvm-ranlib'))
+# LLVM_NM = os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-nm')))
+# LLVM_DWARFDUMP = os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-dwarfdump')))
+# LLVM_OBJCOPY = os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-objcopy')))
+# LLVM_STRIP = os.path.expanduser(build_llvm_tool_path(exe_suffix('llvm-strip')))
+# WASM_LD = os.path.expanduser(build_llvm_tool_path(exe_suffix('wasm-ld')))
+# EPOC32_LD = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/ld')))
+# EPOC32_DLLTOOL = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/dlltool')))
+
+# EMCC = bat_suffix(path_from_root('emcc'))
+# EMXX = bat_suffix(path_from_root('em++'))
+# EMAR = bat_suffix(path_from_root('emar'))
+# EMRANLIB = bat_suffix(path_from_root('emranlib'))
+# EMCMAKE = bat_suffix(path_from_root('emcmake'))
+# EMCONFIGURE = bat_suffix(path_from_root('emconfigure'))
+# EM_NM = bat_suffix(path_from_root('emnm'))
+# FILE_PACKAGER = bat_suffix(path_from_root('tools/file_packager'))
+# WASM_SOURCEMAP = bat_suffix(path_from_root('tools/wasm-sourcemap'))
 # Windows .dll suffix is not included in this list, since those are never
 # linked to directly on the command line.
 DYLIB_EXTENSIONS = ['.dylib', '.so']
