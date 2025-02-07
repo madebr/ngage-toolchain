@@ -52,7 +52,7 @@ from tools.response_file import substitute_response_files
 from tools import config
 # from tools import cache
 from tools.settings import default_setting, user_settings, settings, MEM_SIZE_SETTINGS, COMPILE_TIME_SETTINGS
-from tools.utils import read_file, removeprefix, memoize
+from tools.utils import read_file, removeprefix, memoize, WINDOWS
 # from tools import feature_matrix
 
 logger = logging.getLogger('ngagesdk')
@@ -426,8 +426,8 @@ def get_cflags(user_args):
     cflags = get_clang_flags(user_args)
     # cflags.append('--sysroot=' + cache.get_sysroot(absolute=True))
 
-    if settings.MAIN_GCCMAIN_MACRO:
-        cflags.append('-Dmain=__gccmain')
+    # if settings.MAIN_GCCMAIN_MACRO:
+    #     cflags.append('-Dmain=__gccmain')
 
     # if not settings.STRICT:
     #     # The preprocessor define EMSCRIPTEN is deprecated. Don't pass it to code
@@ -532,7 +532,7 @@ def run(args):
         print(textwrap.dedent('''
             ------------------------------------------------------------------
             
-            ngage-cc: supported targets: arm-epoc-pe, thumb-epoc-pe, NOT elf
+            ngagecc: supported targets: arm-epoc-pe, thumb-epoc-pe, NOT elf
             (autoconf likes to see elf above to enable shared object support)
         '''))
         return 0
@@ -1301,6 +1301,15 @@ def is_int(s):
 
 @ToolchainProfiler.profile()
 def main(args):
+    if WINDOWS:
+        if "NGAGESDK" in os.environ:
+            ngagesdk_path = os.environ["NGAGESDK"]
+            os.environ["PATH"] = os.path.pathsep.join((
+                os.path.join(ngagesdk_path, "sdk\\sdk\\6.1\\Shared\\EPOC32\\gcc\\bin"),
+                os.path.join(ngagesdk_path, "sdk\\sdk\\6.1\\Shared\\EPOC32\\ngagesdk\\bin"),
+                os.environ["PATH"],
+            ))
+
     start_time = time.time()
     ret = run(args)
     logger.debug('total time: %.2f seconds', (time.time() - start_time))

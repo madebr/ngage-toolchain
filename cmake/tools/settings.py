@@ -80,7 +80,7 @@ JS_ONLY_SETTINGS = {
 # Subset of settings that apply at compile time.
 # (Keep in sync with [compile] comments in settings.js)
 COMPILE_TIME_SETTINGS = {
-    'MAIN_GCCMAIN_MACRO',
+    # 'MAIN_GCCMAIN_MACRO',
     'MAIN_E32main_MACRO',
     # 'MEMORY64',
     'INLINING_LIMIT',

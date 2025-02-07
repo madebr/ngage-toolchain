@@ -77,7 +77,7 @@ logger = logging.getLogger('shared')
 # # Don't show legacy settings warnings by default
 # diagnostics.add_warning('legacy-settings', enabled=False, part_of_all=False)
 # # Catch-all for other emcc warnings
-diagnostics.add_warning('missing-uid')
+diagnostics.add_warning('uid')
 # diagnostics.add_warning('emcc')
 # diagnostics.add_warning('undefined', error=True)
 diagnostics.add_warning('deprecated', shared=True)
@@ -537,7 +537,7 @@ def build_clang_tool_path(tool):
 # Some distributions ship with multiple clang versions so they add
 # the version to the binaries, cope with that
 def build_ngage_tool_path(tool):
-    return os.path.join(os.environ["NGAGESDK"], "sdk/6.1/Shared/EPOC32", tool)
+    return os.path.join(os.environ["NGAGESDK"], "sdk/sdk/6.1/Shared/EPOC32", tool)
     # if config.CLANG_ADD_VERSION:
     #     return os.path.join(config.LLVM_ROOT, tool + "-" + config.CLANG_ADD_VERSION)
     # else:
@@ -804,10 +804,17 @@ class OFormat(Enum):
 
 # EPOC32_CC = os.path.expanduser(build_ngage_tool_path(exe_suffix('ngagesdk/bin/arm-epoc-pe-gcc')))
 
-EPOC32_CC = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/arm-epoc-pe-gcc')))
-EPOC32_CXX = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/g++')))
-EPOC32_LD = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/arm-epoc-pe-ld')))
-EPOC32_DLLTOOL = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/arm-epoc-pe-dlltool')))
+if WINDOWS:
+    # EPOC32_CC = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/gcc'))).replace("/","\\")
+    EPOC32_CC = os.path.expanduser(build_ngage_tool_path(exe_suffix('ngagesdk/bin/arm-epoc-pe-gcc'))).replace("/","\\")
+    EPOC32_CXX = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/g++'))).replace("/","\\")
+    EPOC32_LD = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/ld'))).replace("/","\\")
+    EPOC32_DLLTOOL = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/dlltool'))).replace("/","\\")
+else:
+    EPOC32_CC = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/arm-epoc-pe-gcc')))
+    EPOC32_CXX = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/g++')))
+    EPOC32_LD = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/arm-epoc-pe-ld')))
+    EPOC32_DLLTOOL = os.path.expanduser(build_ngage_tool_path(exe_suffix('gcc/bin/arm-epoc-pe-dlltool')))
 EPOC32_PETRAN = os.path.expanduser(build_ngage_tool_path(exe_suffix('tools/petran')))
 # CLANG_SCAN_DEPS = build_llvm_tool_path(exe_suffix('clang-scan-deps'))
 # LLVM_AR = build_llvm_tool_path(exe_suffix('llvm-ar'))

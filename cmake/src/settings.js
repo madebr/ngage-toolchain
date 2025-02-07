@@ -53,9 +53,9 @@ var UID2 = '';
 // [compile]
 var UID3 = '';
 
-// Define main=__gccmain macro
-// [compile]
-var MAIN_GCCMAIN_MACRO = true;
+//// Define main=__gccmain macro
+//// [compile]
+//var MAIN_GCCMAIN_MACRO = true;
 
 // set entry address (argument of '-Wl,-e' and `-Wl,-u' )
 // [link]
@@ -83,6 +83,14 @@ var EXPORTED_FUNCTIONS = [];
 // [link]
 var FIXME_DLLTOOL_LD_PETRAN = true;
 
+// [link]
+var STACK_SIZE = 500000;
+
+// [link]
+var HEAP_START = 1000000;
+
+// [link]
+var HEAP_MAXIMUM = 20000000;
 
 // // Define main=E32Main macro
 // // [compile]

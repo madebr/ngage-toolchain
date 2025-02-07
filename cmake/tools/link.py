@@ -511,6 +511,9 @@ def phase_linker_setup(options, state) -> LinkArtifactNames:
         target = "a.exe"
 
     final_suffix = get_file_suffix(target)
+    if not final_suffix:
+        final_suffix = ".exe"
+        target += final_suffix
 
     for s, reason in DEPRECATED_SETTINGS.items():
         if s in user_settings:
@@ -580,11 +583,21 @@ def phase_linker_setup(options, state) -> LinkArtifactNames:
             raise NotImplementedError
 
         if not settings.UID1:
-            diagnostics.warning('missing-uid', 'Assuming UID1=0x0. Add "-s UID1=0xabcdef01" to set an explicit uid3')
+            diagnostics.warning('uid', 'Assuming UID1=0x0. Add "-s UID1=0xabcdef01" to set an explicit uid3')
+            settings.UID1 = "0x00000000"
         if not settings.UID2:
-            diagnostics.warning('missing-uid', 'Assuming UID2=0x0. Add "-s UID2=0xabcdef01" to set an explicit uid3')
+            diagnostics.warning('uid', 'Assuming UID2=0x0. Add "-s UID2=0xabcdef01" to set an explicit uid3')
+            settings.UID2 = "0x00000000"
         if not settings.UID3:
-            diagnostics.warning('missing-uid', 'Assuming UID3=0x0. Add "-s UID3=0xabcdef01" to set an explicit uid3')
+            diagnostics.warning('uid', 'Assuming UID3=0x0. Add "-s UID3=0xabcdef01" to set an explicit uid3')
+            settings.UID3 = "0x00000000"
+
+        if not settings.UID1.startswith("0x"):
+            diagnostics.warning('uid', 'UID1 must be a hexadicimal number and start with "0x"')
+        if not settings.UID2.startswith("0x"):
+            diagnostics.warning('uid', 'UID2 must be a hexadicimal number and start with "0x"')
+        if not settings.UID3.startswith("0x"):
+            diagnostics.warning('uid', 'UID3 must be a hexadicimal number and start with "0x"')
 
     return targets
 
@@ -639,17 +652,16 @@ def phase_link(linker_arguments, targets: LinkArtifactNames):
             exit_with_error(f"step2: {shared.EPOC32_DLLTOOL} failed to generate {targets.step2_dlltool_exp}")
 
         # Step 3
-        step3_ld_args = filtered_link_args + [targets.step3_ld_exe]
+        step3_ld_args = filtered_link_args + [targets.step2_dlltool_exp, "-o", targets.step3_ld_exe]
         building.link_lld(step3_ld_args, targets.step3_ld_exe)
         if not os.path.isfile(targets.step3_ld_exe):
             exit_with_error(f"step3: {shared.EPOC32_LD} failed to generate {targets.step3_ld_exe}")
 
         # Step 4
-        building.check_call([shared.EPOC32_PETRAN, targets.step4_petran_exe, targets.step3_ld_exe, "-nocall", "-uid1", settings.UID1, "-uid2", settings.UID2, "-uid3", settings.UID3, "-stack", str(settings.STACK_SIZE), "-heap", str(settings.HEAP_START), str(settings.HEAP_MAXIMUM)])
+        building.check_call([shared.EPOC32_PETRAN, targets.step3_ld_exe, targets.step4_petran_exe, "-nocall", "-uid1", settings.UID1, "-uid2", settings.UID2, "-uid3", settings.UID3, "-stack", str(settings.STACK_SIZE), "-heap", str(settings.HEAP_START), str(settings.HEAP_MAXIMUM)])
         if not os.path.isfile(targets.step4_petran_exe):
             exit_with_error(f"step4: {shared.EPOC32_PETRAN} failed to generate {targets.step4_petran_exe}")
 
-        raise NotImplementedError
         building.link_lld(linker_arguments, targets.step1_ld_exe)
     else:
         building.link_lld(linker_arguments, targets.step1_ld_exe)
@@ -1192,6 +1204,12 @@ def phase_calculate_linker_inputs(options, state, linker_inputs):
     # relative order on the command line (both of these list are pairs, with the
     # first element being their command line position).
     linker_args = [val for _, val in sorted(linker_inputs + state.link_flags)]
+
+    if "-nostlib" not in linker_args:
+        linker_args = [
+             "-e", "_E32Startup", "-u", "_E32Startup",
+            os.path.join(os.environ["NGAGESDK"], "sdk", "ngagesdk_entry.o"),
+        ] + linker_args
 
     # If we are linking to an intermediate object then ignore other
     # "fake" dynamic libraries, since otherwise we will end up with
