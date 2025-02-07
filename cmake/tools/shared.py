@@ -68,8 +68,8 @@ EMSCRIPTEN_TEMP_DIR = None
 
 logger = logging.getLogger('shared')
 
-# # warning about absolute-paths is disabled by default, and not enabled by -Wall
-# diagnostics.add_warning('absolute-paths', enabled=False, part_of_all=False)
+# warning about absolute-paths is disabled by default, and not enabled by -Wall
+diagnostics.add_warning('absolute-paths', enabled=False, part_of_all=False)
 # # unused diagnostic flags.  TODO(sbc): remove at some point
 # diagnostics.add_warning('almost-asm')
 # diagnostics.add_warning('experimental')
