@@ -19,6 +19,7 @@
 #include "tilemap.h"
 
 extern SDL_Renderer* renderer;
+extern SDL_Window* window;
 
 static SDL_Texture* SDL_screen = NULL; // Render-target for the PICO8 128x128 framebuffer.
 static SDL_Texture* frame = NULL;
