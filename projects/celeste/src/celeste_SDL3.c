@@ -395,7 +395,6 @@ void Destroy()
 
 	Mix_CloseAudio();
 	Mix_Quit();
-	SDL_CloseAudioDevice(audio_device);
 	SDL_DestroyRenderer(renderer);
 	SDL_DestroyWindow(window);
 }
